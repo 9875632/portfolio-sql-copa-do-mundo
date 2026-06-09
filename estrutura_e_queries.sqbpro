@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?><sqlb_project><db path="copadomundo.db" readonly="0" foreign_keys="1" case_sensitive_like="0" temp_store="0" wal_autocheckpoint="1000" synchronous="2"/><attached/><window><main_tabs open="structure browser pragmas query" current="3"/></window><tab_structure><column_width id="0" width="300"/><column_width id="1" width="0"/><column_width id="2" width="100"/><column_width id="3" width="3368"/><column_width id="4" width="0"/><expanded_item id="0" parent="1"/><expanded_item id="1" parent="1"/><expanded_item id="2" parent="1"/><expanded_item id="3" parent="1"/></tab_structure><tab_browse><table title="TEMP_MATCHES" custom_title="0" dock_id="1" table="4,12:mainTEMP_MATCHES"/><dock_state state="000000ff00000000fd00000001000000020000000000000000fc0100000001fb000000160064006f0063006b00420072006f00770073006500310100000000ffffffff0000011800ffffff000000000000000000000004000000040000000800000008fc00000000"/><default_encoding codec=""/><browse_table_settings/></tab_browse><tab_sql><sql name="SQL 1">PRAGMA foreign_keys = ON;
+
+
+CREATE TABLE TB_SELECAO (
+    id_selecao INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome_selecao TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE TB_CIDADE (
+    id_cidade INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome_cidade TEXT NOT NULL,
+    pais_sede TEXT NOT NULL
+);
+
+CREATE TABLE TB_ESTADIO (
+    id_estadio INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome_estadio TEXT NOT NULL,
+    id_cidade INTEGER NOT NULL,
+    FOREIGN KEY (id_cidade) REFERENCES TB_CIDADE(id_cidade)
+);
+
+CREATE TABLE TB_PARTIDA (
+    id_partida INTEGER PRIMARY KEY,
+    ano INTEGER NOT NULL,
+    data_hora TEXT NOT NULL,
+    fase TEXT NOT NULL,
+    id_estadio INTEGER NOT NULL,
+    id_selecao_casa INTEGER NOT NULL,
+    gols_casa INTEGER NOT NULL DEFAULT 0,
+    gols_visitante INTEGER NOT NULL DEFAULT 0,
+    id_selecao_visitante INTEGER NOT NULL,
+    publico INTEGER,
+    FOREIGN KEY (id_estadio) REFERENCES TB_ESTADIO(id_estadio),
+    FOREIGN KEY (id_selecao_casa) REFERENCES TB_SELECAO(id_selecao),
+    FOREIGN KEY (id_selecao_visitante) REFERENCES TB_SELECAO(id_selecao)
+);
+
+CREATE TABLE TB_JOGADOR (
+    id_jogador INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome_jogador TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE TB_JOGADOR_PARTIDA (
+    id_partida INTEGER,
+    id_jogador INTEGER,
+    id_selecao INTEGER,
+    posicao TEXT,
+    num_camisa INTEGER,
+    evento TEXT,
+    PRIMARY KEY (id_partida, id_jogador),
+    FOREIGN KEY (id_partida) REFERENCES TB_PARTIDA(id_partida),
+    FOREIGN KEY (id_jogador) REFERENCES TB_JOGADOR(id_jogador),
+    FOREIGN KEY (id_selecao) REFERENCES TB_SELECAO(id_selecao)
+);
+
+
+
+INSERT INTO TB_SELECAO (nome_selecao)
+SELECT DISTINCT &quot;Home Team Name&quot; FROM TEMP_MATCHES WHERE &quot;Home Team Name&quot; IS NOT NULL AND &quot;Home Team Name&quot; != ''
+UNION
+SELECT DISTINCT &quot;Away Team Name&quot; FROM TEMP_MATCHES WHERE &quot;Away Team Name&quot; IS NOT NULL AND &quot;Away Team Name&quot; != '';
+
+
+INSERT INTO TB_CIDADE (nome_cidade, pais_sede)
+SELECT DISTINCT tm.City, tc.Country 
+FROM TEMP_MATCHES tm
+JOIN TEMP_CUPS tc ON tm.Year = tc.Year
+WHERE tm.City IS NOT NULL;
+
+INSERT INTO TB_ESTADIO (nome_estadio, id_cidade)
+SELECT DISTINCT tm.Stadium, c.id_cidade
+FROM TEMP_MATCHES tm
+JOIN TB_CIDADE c ON tm.City = c.nome_cidade;
+
+
+INSERT INTO TB_PARTIDA (id_partida, ano, data_hora, fase, id_estadio, id_selecao_casa, gols_casa, gols_visitante, id_selecao_visitante, publico)
+SELECT 
+    tm.&quot;MatchID&quot;, tm.&quot;Year&quot;, tm.&quot;Datetime&quot;, tm.&quot;Stage&quot;, e.id_estadio, 
+    s_casa.id_selecao, tm.&quot;Home Team Goals&quot;, tm.&quot;Away Team Goals&quot;, s_vis.id_selecao, tm.&quot;Attendance&quot;
+FROM TEMP_MATCHES tm
+JOIN TB_ESTADIO e ON tm.Stadium = e.nome_estadio
+JOIN TB_SELECAO s_casa ON tm.&quot;Home Team Name&quot; = s_casa.nome_selecao
+JOIN TB_SELECAO s_vis ON tm.&quot;Away Team Name&quot; = s_vis.nome_selecao
+WHERE tm.&quot;MatchID&quot; IS NOT NULL
+GROUP BY tm.&quot;MatchID&quot;;
+
+
+INSERT INTO TB_JOGADOR (nome_jogador)
+SELECT DISTINCT &quot;Player Name&quot; FROM TEMP_PLAYERS WHERE &quot;Player Name&quot; IS NOT NULL AND &quot;Player Name&quot; != '';
+
+
+INSERT INTO TB_JOGADOR_PARTIDA (id_partida, id_jogador, id_selecao, posicao, num_camisa, evento)
+SELECT 
+    tp.&quot;MatchID&quot;, j.id_jogador, s.id_selecao, tp.&quot;Position&quot;, tp.&quot;Shirt Number&quot;, tp.&quot;Event&quot;
+FROM TEMP_PLAYERS tp
+JOIN TB_JOGADOR j ON tp.&quot;Player Name&quot; = j.nome_jogador
+JOIN TB_SELECAO s ON tp.&quot;Team Initials&quot; = s.nome_selecao OR s.nome_selecao LIKE tp.&quot;Team Initials&quot; || '%'
+WHERE tp.&quot;MatchID&quot; IS NOT NULL
+GROUP BY tp.&quot;MatchID&quot;, j.id_jogador;
+
+
+SELECT e.nome_estadio AS Estadio, c.nome_cidade AS Cidade, COUNT(p.id_partida) AS Total_Finais, AVG(p.gols_casa + p.gols_visitante) AS Media_Gols_por_Final
+FROM TB_PARTIDA p
+INNER JOIN TB_ESTADIO e ON p.id_estadio = e.id_estadio
+INNER JOIN TB_CIDADE c ON e.id_cidade = c.id_cidade
+WHERE p.fase LIKE '%Final%'
+GROUP BY e.id_estadio
+ORDER BY Media_Gols_por_Final DESC, Total_Finais DESC LIMIT 5;
+
+
+SELECT j.nome_jogador AS Jogador, s.nome_selecao AS Selecao, COUNT(jp.id_partida) AS Partidas_com_Gol_e_Derrota
+FROM TB_JOGADOR_PARTIDA jp
+INNER JOIN TB_JOGADOR j ON jp.id_jogador = j.id_jogador
+INNER JOIN TB_SELECAO s ON jp.id_selecao = s.id_selecao
+INNER JOIN TB_PARTIDA p ON jp.id_partida = p.id_partida
+WHERE jp.evento LIKE '%G%' AND ((p.id_selecao_casa = s.id_selecao AND p.gols_casa &lt; p.gols_visitante) OR (p.id_selecao_visitante = s.id_selecao AND p.gols_visitante &lt; p.gols_casa))
+GROUP BY j.id_jogador, s.nome_selecao
+ORDER BY Partidas_com_Gol_e_Derrota DESC LIMIT 5;
+
+
+SELECT e.nome_estadio AS Estadio, c.nome_cidade AS Cidade, COUNT(p.id_partida) AS Jogos_Emocionantes, AVG(p.publico) AS Media_Publico
+FROM TB_PARTIDA p
+INNER JOIN TB_ESTADIO e ON p.id_estadio = e.id_estadio
+INNER JOIN TB_CIDADE c ON e.id_cidade = c.id_cidade
+WHERE (p.gols_casa + p.gols_visitante) &gt;= 4
+GROUP BY e.id_estadio
+HAVING Jogos_Emocionantes &gt;= 3
+ORDER BY Media_Publico DESC LIMIT 5;
+
+
+SELECT s.nome_selecao AS Selecao, COUNT(p.id_partida) AS Partidas_Como_Sede, SUM(p.gols_casa) AS Total_Gols_Sede, AVG(p.gols_casa) AS Media_Gols_Sede
+FROM TB_SELECAO s
+LEFT JOIN TB_PARTIDA p ON s.id_selecao = p.id_selecao_casa
+INNER JOIN TB_ESTADIO e ON p.id_estadio = e.id_estadio
+INNER JOIN TB_CIDADE c ON e.id_cidade = c.id_cidade
+WHERE c.pais_sede = s.nome_selecao
+GROUP BY s.id_selecao
+ORDER BY Media_Gols_Sede DESC LIMIT 10;
+
+
+SELECT e.nome_estadio AS Estadio, COUNT(DISTINCT p.id_selecao_casa) + COUNT(DISTINCT p.id_selecao_visitante) AS Diversidade_de_Paises
+FROM TB_PARTIDA p
+INNER JOIN TB_ESTADIO e ON p.id_estadio = e.id_estadio
+GROUP BY e.id_estadio
+HAVING Diversidade_de_Paises &gt; 10
+ORDER BY Diversidade_de_Paises DESC;
+
+
+SELECT c.nome_cidade AS Cidade, c.pais_sede AS Pais_Sede, COUNT(p.id_partida) AS Total_Jogos, SUM(p.gols_casa + p.gols_visitante) AS Total_Gols_Na_Cidade, AVG(p.gols_casa + p.gols_visitante) AS Media_Gols_Jogo
+FROM TB_PARTIDA p
+INNER JOIN TB_ESTADIO e ON p.id_estadio = e.id_estadio
+INNER JOIN TB_CIDADE c ON e.id_cidade = c.id_cidade
+GROUP BY c.id_cidade
+ORDER BY Total_Gols_Na_Cidade DESC LIMIT 10;
+
+
+SELECT (p.ano / 10) * 10 AS Decada, COUNT(p.id_partida) AS Total_Partidas, SUM(p.gols_casa + p.gols_visitante) AS Total_Gols, AVG(p.publico) AS Media_Público_Decada
+FROM TB_PARTIDA p
+GROUP BY Decada
+ORDER BY Decada ASC;
+
+
+SELECT s.nome_selecao AS Selecao_Visitante, COUNT(p.id_partida) AS Total_Jogos_Fora, SUM(p.gols_casa) AS Gols_Sofridos, AVG(p.gols_casa) AS Media_Gols_Sofridos
+FROM TB_PARTIDA p
+INNER JOIN TB_SELECAO s ON p.id_selecao_visitante = s.id_selecao
+GROUP BY s.id_selecao
+HAVING Total_Jogos_Fora &gt;= 5
+ORDER BY Media_Gols_Sofridos DESC LIMIT 10;
+
+
+SELECT p.fase AS Fase_Mundial, COUNT(p.id_partida) AS Qtd_Jogos, SUM(p.gols_casa + p.gols_visitante) AS Total_Gols, AVG(p.gols_casa + p.gols_visitante) AS Media_Gols_Fase
+FROM TB_PARTIDA p
+WHERE p.fase LIKE '%Semi%' OR p.fase LIKE '%Final%'
+GROUP BY p.fase;
+
+
+SELECT j.nome_jogador AS Jogador, s.nome_selecao AS Selecao, COUNT(jp.evento) AS Total_Eventos_Registrados
+FROM TB_JOGADOR_PARTIDA jp
+INNER JOIN TB_JOGADOR j ON jp.id_jogador = j.id_jogador
+INNER JOIN TB_SELECAO s ON jp.id_selecao = s.id_selecao
+WHERE jp.evento IS NOT NULL AND jp.evento != ''
+GROUP BY j.id_jogador, s.id_selecao
+ORDER BY Total_Eventos_Registrados DESC LIMIT 10;
+
+
+SELECT p.fase AS Fase, COUNT(p.id_partida) AS Partidas_Empatadas
+FROM TB_PARTIDA p
+WHERE p.gols_casa = p.gols_visitante
+GROUP BY p.fase
+ORDER BY Partidas_Empatadas DESC;
+
+
+SELECT e.nome_estadio AS Estadio, c.nome_cidade AS Cidade, COUNT(p.id_partida) AS Total_Jogos_Recebidos
+FROM TB_PARTIDA p
+INNER JOIN TB_ESTADIO e ON p.id_estadio = e.id_estadio
+INNER JOIN TB_CIDADE c ON e.id_cidade = c.id_cidade
+GROUP BY e.id_estadio
+HAVING Total_Jogos_Recebidos &lt;= 2
+ORDER BY Total_Jogos_Recebidos ASC;
+
+
+SELECT s.nome_selecao AS Selecao_Mandante, COUNT(p.id_partida) AS Jogos_Como_Mandante, SUM(p.gols_casa) AS Gols_Feitos, AVG(p.gols_casa) AS Media_Gols_Feitos
+FROM TB_PARTIDA p
+INNER JOIN TB_SELECAO s ON p.id_selecao_casa = s.id_selecao
+GROUP BY s.id_selecao
+HAVING Jogos_Como_Mandante &gt;= 10
+ORDER BY Media_Gols_Feitos DESC LIMIT 5;
+
+
+SELECT p.ano AS Ano_Copa, COUNT(p.id_partida) AS Total_Jogos, MAX(p.publico) AS Maior_Publico_Registrado, MIN(p.publico) AS Menor_Publico_Registrado, AVG(p.publico) AS Media_Publico_Ano
+FROM TB_PARTIDA p
+GROUP BY p.ano
+ORDER BY p.ano DESC;
+
+
+SELECT j.nome_jogador AS Nome_Atleta, s.nome_selecao AS Pais_Origem, COUNT(jp.id_partida) AS Total_Presencas_Em_Campo
+FROM TB_JOGADOR_PARTIDA jp
+INNER JOIN TB_JOGADOR j ON jp.id_jogador = j.id_jogador
+INNER JOIN TB_SELECAO s ON jp.id_selecao = s.id_selecao
+WHERE s.nome_selecao NOT IN ('Brazil', 'Germany', 'Italy', 'Argentina', 'France')
+GROUP BY j.id_jogador, s.id_selecao
+HAVING Total_Presencas_Em_Campo &gt;= 5
+ORDER BY Total_Presencas_Em_Campo DESC LIMIT 10;</sql><current_tab id="0"/></tab_sql></sqlb_project>
